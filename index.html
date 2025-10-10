@@ -5,7 +5,6 @@
   <title>CTP Page Monitor - Mobile Viewer</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    /* --- CSS Variables for Compact Dark Theme --- */
     :root {
       --color-bg-primary: #0f0f12;
       --color-bg-secondary: #1a1a1f;
@@ -28,7 +27,6 @@
       --spacing-unit: 6px;
     }
 
-    /* --- Base Styles --- */
     body {
       margin: 0;
       font-family: 'Segoe UI', Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -39,7 +37,6 @@
       line-height: 1.3;
     }
 
-    /* --- Header & Navigation --- */
     .header-bar {
       display: flex;
       align-items: center;
@@ -86,7 +83,6 @@
       text-align: center;
     }
 
-    /* --- Status Cards Layout --- */
     .container {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -126,7 +122,6 @@
       border-bottom: none; 
     }
 
-    /* Column widths */
     .filename-col {
       width: 15%;
       white-space: nowrap;
@@ -197,67 +192,32 @@
       padding: 20px;
       color: var(--color-text-dim);
     }
-
-    .config-section {
-      background: var(--color-bg-secondary);
-      padding: 10px;
-      border-radius: var(--border-radius);
-      margin-bottom: 10px;
-    }
-    
-    .config-input {
-      background: var(--color-bg-card);
-      border: 1px solid var(--color-border);
-      color: var(--color-text-light);
-      padding: 6px 8px;
-      border-radius: var(--border-radius);
-      width: 100%;
-      box-sizing: border-box;
-      margin-bottom: 8px;
-    }
-    
-    .config-btn {
-      background: var(--color-accent-blue);
-      color: white;
-      border: none;
-      border-radius: var(--border-radius);
-      padding: 8px 12px;
-      cursor: pointer;
-      width: 100%;
-    }
   </style>
 </head>
 <body>
   <div class="header-bar">
     <div class="title">CTP Page Monitor</div>
     <div class="nav-controls">
-      <button id="prev-date-btn" class="nav-btn" disabled>←</button>
-      <div id="current-date" class="current-date">-</div>
-      <button id="next-date-btn" class="nav-btn" disabled>→</button>
-    </div>
-  </div>
-
-  <div id="configSection" class="config-section">
-    <h3 style="margin-top: 0; color: var(--color-accent-yellow);">Google Apps Script URL</h3>
-    <input type="text" id="gas-url" class="config-input" 
-           placeholder="https://script.google.com/macros/s/..." 
-           value="https://script.google.com/macros/s/AKfycbzQ8-Wgdg44ogQfKAoZSEoDQMaXRc7KT6EG4x1UFRk5RhcHp-ergUwtIQEnrUREItgV/exec">
-    <button id="connect-btn" class="config-btn">Connect & Load Dates</button>
+  <!-- Left arrow button on left -->
+  <button id="prev-date-btn" class="nav-btn" disabled>←</button>
+  <div id="current-date" class="current-date">Loading...</div>
+  <!-- Right arrow button on right -->
+  <button id="next-date-btn" class="nav-btn" disabled>→</button>
+</div>
   </div>
 
   <div id="errorContainer"></div>
-  <div id="loadingMessage" class="loading" style="display: none;">Loading available dates...</div>
+  <div id="loadingMessage" class="loading">Loading data...</div>
   <div class="container" id="cards"></div>
 
   <script>
-    // Configuration
-    let GAS_URL = "https://script.google.com/macros/s/AKfycbzQ8-Wgdg44ogQfKAoZSEoDQMaXRc7KT6EG4x1UFRk5RhcHp-ergUwtIQEnrUREItgV/exec";
+    // Configuration - Hardcoded GAS URL
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbzQ8-Wgdg44ogQfKAoZSEoDQMaXRc7KT6EG4x1UFRk5RhcHp-ergUwtIQEnrUREItgV/exec";
     let availableDates = [];
     let currentDateIndex = -1;
+    let currentDatePrefix = '';
 
     // DOM Elements
-    const gasUrlInput = document.getElementById('gas-url');
-    const connectBtn = document.getElementById('connect-btn');
     const prevDateBtn = document.getElementById('prev-date-btn');
     const nextDateBtn = document.getElementById('next-date-btn');
     const currentDateEl = document.getElementById('current-date');
@@ -294,18 +254,36 @@
       loadingMessage.style.display = 'none';
     }
 
-    // Fetch available dates from Google Apps Script
-    async function fetchAvailableDates() {
+    // Fetch default date from Google Sheets Settings
+    async function fetchDefaultDate() {
       try {
-        const url = `${GAS_URL}?action=listDates`;
-        console.log('Fetching dates from:', url);
-        
+        const url = `${GAS_URL}?action=getDefaultDate`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         
         const json = await res.json();
-        console.log('Dates response:', json);
+        if (json.status === 'success' && json.default_date) {
+          return json.default_date;
+        }
+        throw new Error('Invalid default date response');
+      } catch (err) {
+        console.error('Failed to fetch default date:', err);
+        // Fallback to today's date
+        const today = new Date();
+        return String(today.getDate()).padStart(2, '0') + 
+               String(today.getMonth() + 1).padStart(2, '0') + 
+               today.getFullYear();
+      }
+    }
+
+    // Fetch available dates from Google Apps Script
+    async function fetchAvailableDates() {
+      try {
+        const url = `${GAS_URL}?action=listDates`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         
+        const json = await res.json();
         if (json.status === 'success' && Array.isArray(json.dates)) {
           return json.dates;
         } else {
@@ -321,16 +299,16 @@
     async function loadSnapshotForDate(datePrefix) {
       try {
         const url = `${GAS_URL}?action=getSnapshot&date=${datePrefix}`;
-        console.log('Fetching snapshot from:', url);
-        
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         
         const json = await res.json();
-        console.log('Snapshot response:', json);
-        
-        if (json.status === 'success' && json.page_log_json) {
-          return JSON.parse(json.page_log_json);
+        if (json.status === 'success') {
+          // Return both the snapshot data AND the date from column A
+          return {
+            snapshot: JSON.parse(json.page_log_json),
+            datePrefix: json.date_prefix // This comes from column A
+          };
         } else if (json.status === 'not_found') {
           throw new Error('No snapshot found for this date');
         } else {
@@ -343,16 +321,19 @@
     }
 
     // Render status cards from snapshot data
-    function renderStatusCards(snapshot) {
+    function renderStatusCards(snapshotData) {
       cardsContainer.innerHTML = '';
 
-      if (!snapshot || !snapshot.status) {
+      if (!snapshotData || !snapshotData.snapshot || !snapshotData.snapshot.status) {
         cardsContainer.innerHTML = '<div class="error">No data available for this date</div>';
         return;
       }
 
-      // Update current date display
-      currentDateEl.textContent = formatDisplayDate(snapshot.monitoring_date);
+      const { snapshot, datePrefix } = snapshotData;
+
+      // Update current date display with the date from column A
+      currentDatePrefix = datePrefix;
+      currentDateEl.textContent = formatDisplayDate(datePrefix);
 
       // Helper function to convert the full filename to abbreviated version
       function getAbbreviatedFilename(fullFileName) {
@@ -447,96 +428,114 @@
     }
 
     // Navigate to a specific date
-    async function navigateToDate(index) {
-      if (index < 0 || index >= availableDates.length) return;
-      
-      currentDateIndex = index;
-      const datePrefix = availableDates[index];
-      
-      clearError();
-      showLoading(`Loading data for ${formatDisplayDate(datePrefix)}...`);
-      
-      try {
-        const snapshot = await loadSnapshotForDate(datePrefix);
+// Navigate to a specific date
+async function navigateToDate(index) {
+    if (index < 0 || index >= availableDates.length) return;
+    
+    currentDateIndex = index;
+    const datePrefix = availableDates[index];
+    
+    clearError();
+    showLoading(`Loading data for ${formatDisplayDate(datePrefix)}...`);
+    
+    try {
+        const snapshotData = await loadSnapshotForDate(datePrefix);
         hideLoading();
-        renderStatusCards(snapshot);
-      } catch (err) {
+        renderStatusCards(snapshotData);
+        
+        // Update navigation buttons
+        updateNavigationButtons();
+    } catch (err) {
         hideLoading();
         showError(err.message);
-      }
-      
-      // Update navigation buttons
-      prevDateBtn.disabled = currentDateIndex <= 0;
-      nextDateBtn.disabled = currentDateIndex >= availableDates.length - 1;
+    }
+}
+
+// Update navigation buttons state - CORRECTED BEHAVIOR
+function updateNavigationButtons() {
+    // Left arrow button (←) disabled when at the most recent date (last index)
+    prevDateBtn.disabled = currentDateIndex >= availableDates.length - 1;
+    // Right arrow button (→) disabled when at the oldest date (index 0)
+    nextDateBtn.disabled = currentDateIndex <= 0;
+}
+
+// Event listeners for navigation - CORRECTED BEHAVIOR
+prevDateBtn.addEventListener('click', () => {
+    // Left arrow button (←) - go to previous (older) date
+    if (currentDateIndex < availableDates.length - 1) {
+        navigateToDate(currentDateIndex + 1);
+    }
+});
+
+nextDateBtn.addEventListener('click', () => {
+    // Right arrow button (→) - go to next (more recent) date
+    if (currentDateIndex > 0) {
+        navigateToDate(currentDateIndex - 1);
+    }
+});
+    // Update navigation buttons state - SWAPPED BUTTONS
+    function updateNavigationButtons() {
+      // → Right arrow button disabled when at the most recent date (last index)
+      prevDateBtn.disabled = currentDateIndex >= availableDates.length - 1;
+      // ← Left arrow button disabled when at the oldest date (index 0)
+      nextDateBtn.disabled = currentDateIndex <= 0;
     }
 
-    // Connect to GAS and load dates
-    async function connectToGAS() {
-      GAS_URL = gasUrlInput.value.trim();
-      
-      if (!GAS_URL) {
-        showError('Please enter a valid Google Apps Script URL');
-        return;
-      }
-      
+    // Find index of a date in available dates array
+    function findDateIndex(datePrefix) {
+      return availableDates.findIndex(date => date === datePrefix);
+    }
+
+    // Initialize the viewer
+    async function initializeViewer() {
       try {
-        showLoading('Connecting to Google Apps Script...');
-        clearError();
+        showLoading('Loading default date...');
         
+        // 1. Get default date from Settings sheet
+        const defaultDate = await fetchDefaultDate();
+        
+        // 2. Get all available dates
         availableDates = await fetchAvailableDates();
-        hideLoading();
         
         if (availableDates.length === 0) {
+          hideLoading();
           showError('No saved snapshots found');
           return;
         }
         
-        // Start with the most recent date
-        currentDateIndex = 0;
-        await navigateToDate(currentDateIndex);
+        // 3. Find the default date in available dates, or use most recent
+        let targetDateIndex = findDateIndex(defaultDate);
+        if (targetDateIndex === -1) {
+          // Default date not found, use most recent date
+          targetDateIndex = 0;
+        }
         
-        // Hide config section after successful connection
-        document.getElementById('configSection').style.display = 'none';
+        // 4. Load the target date
+        await navigateToDate(targetDateIndex);
         
       } catch (err) {
         hideLoading();
-        showError(err.message);
+        showError('Failed to initialize: ' + err.message);
       }
     }
 
-    // Event listeners
-    connectBtn.addEventListener('click', connectToGAS);
-    
-    gasUrlInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        connectToGAS();
-      }
-    });
-
+    // Event listeners for navigation - SWAPPED BUTTONS
     prevDateBtn.addEventListener('click', () => {
-      if (currentDateIndex > 0) {
-        navigateToDate(currentDateIndex - 1);
-      }
-    });
-
-    nextDateBtn.addEventListener('click', () => {
+      // → Right arrow button - go to next (more recent) date
       if (currentDateIndex < availableDates.length - 1) {
         navigateToDate(currentDateIndex + 1);
       }
     });
 
-    // Load GAS URL from localStorage if available
-    window.addEventListener('DOMContentLoaded', () => {
-      const savedUrl = localStorage.getItem('ctp_gas_url');
-      if (savedUrl) {
-        gasUrlInput.value = savedUrl;
+    nextDateBtn.addEventListener('click', () => {
+      // ← Left arrow button - go to previous (older) date
+      if (currentDateIndex > 0) {
+        navigateToDate(currentDateIndex - 1);
       }
     });
 
-    // Save GAS URL to localStorage when changed
-    gasUrlInput.addEventListener('change', () => {
-      localStorage.setItem('ctp_gas_url', gasUrlInput.value);
-    });
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', initializeViewer);
   </script>
 </body>
-</html> 
+</html>
