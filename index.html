@@ -83,6 +83,48 @@
       text-align: center;
     }
 
+    /* Tabs styling */
+    .tabs-container {
+      display: flex;
+      overflow-x: auto;
+      background: var(--color-bg-secondary);
+      border-radius: var(--border-radius);
+      margin-bottom: var(--spacing-unit);
+      scrollbar-width: none; /* Firefox */
+    }
+    
+    .tabs-container::-webkit-scrollbar {
+      display: none; /* Chrome, Safari, Edge */
+    }
+    
+    .tab {
+      flex: 1;
+      min-width: 80px;
+      padding: 8px 12px;
+      text-align: center;
+      background: var(--color-bg-secondary);
+      color: var(--color-text-dim);
+      border: none;
+      cursor: pointer;
+      font-size: 0.9em;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+    
+    .tab.active {
+      background: var(--color-accent-blue);
+      color: white;
+      font-weight: bold;
+    }
+    
+    .tab-content {
+      display: none;
+    }
+    
+    .tab-content.active {
+      display: block;
+    }
+
     .container {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -95,6 +137,7 @@
       border-radius: var(--border-radius);
       padding: 0;
       overflow: hidden;
+      margin-bottom: var(--spacing-unit);
     }
 
     .card h3 {
@@ -192,23 +235,54 @@
       padding: 20px;
       color: var(--color-text-dim);
     }
+    
+    .sync-indicator {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+    
+    .sync-active {
+      background-color: var(--color-status-ok);
+      animation: pulse 1s infinite;
+    }
+    
+    .sync-idle {
+      background-color: var(--color-text-dim);
+    }
+    
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
   </style>
 </head>
 <body>
   <div class="header-bar">
     <div class="title">CTP Page Monitor</div>
     <div class="nav-controls">
-  <!-- Left arrow button on left -->
-  <button id="prev-date-btn" class="nav-btn" disabled>←</button>
-  <div id="current-date" class="current-date">Loading...</div>
-  <!-- Right arrow button on right -->
-  <button id="next-date-btn" class="nav-btn" disabled>→</button>
-</div>
+      <button id="prev-date-btn" class="nav-btn" disabled>←</button>
+      <div id="current-date" class="current-date">Loading...</div>
+      <button id="next-date-btn" class="nav-btn" disabled>→</button>
+    </div>
+  </div>
+
+  <div id="tabs-container" class="tabs-container">
+    <!-- Tabs will be dynamically generated -->
   </div>
 
   <div id="errorContainer"></div>
   <div id="loadingMessage" class="loading">Loading data...</div>
-  <div class="container" id="cards"></div>
+  
+  <!-- Tab content containers -->
+  <div id="tab-kokan" class="tab-content"></div>
+  <div id="tab-satara" class="tab-content"></div>
+  <div id="tab-sangli" class="tab-content"></div>
+  <div id="tab-kolhapur" class="tab-content"></div>
+  <div id="tab-pullout" class="tab-content"></div>
 
   <script>
     // Configuration - Hardcoded GAS URL
@@ -216,6 +290,8 @@
     let availableDates = [];
     let currentDateIndex = -1;
     let currentDatePrefix = '';
+    let syncIntervalId = null;
+    let currentActiveTab = 'kokan'; // Track current active tab
 
     // DOM Elements
     const prevDateBtn = document.getElementById('prev-date-btn');
@@ -223,7 +299,7 @@
     const currentDateEl = document.getElementById('current-date');
     const errorContainer = document.getElementById('errorContainer');
     const loadingMessage = document.getElementById('loadingMessage');
-    const cardsContainer = document.getElementById('cards');
+    const tabsContainer = document.getElementById('tabs-container');
 
     // Format date for display
     function formatDisplayDate(dateStr) {
@@ -246,12 +322,81 @@
     function showLoading(message) {
       loadingMessage.textContent = message;
       loadingMessage.style.display = 'block';
-      cardsContainer.innerHTML = '';
+      hideAllTabContents();
     }
 
     // Hide loading state
     function hideLoading() {
       loadingMessage.style.display = 'none';
+    }
+
+    // Hide all tab contents
+    function hideAllTabContents() {
+      const tabContents = document.querySelectorAll('.tab-content');
+      tabContents.forEach(tab => tab.classList.remove('active'));
+    }
+
+    // Clear all tab contents
+    function clearAllTabContents() {
+      const tabContents = document.querySelectorAll('.tab-content');
+      tabContents.forEach(tab => {
+        tab.innerHTML = '';
+      });
+    }
+
+    // Initialize tabs
+    function initializeTabs() {
+      const tabs = [
+        { id: 'kokan', label: 'Kokan' },
+        { id: 'satara', label: 'Satara' },
+        { id: 'sangli', label: 'Sangli' },
+        { id: 'kolhapur', label: 'Kolhapur' }
+      ];
+      
+      tabsContainer.innerHTML = '';
+      
+      tabs.forEach(tab => {
+        const tabElement = document.createElement('button');
+        tabElement.className = 'tab';
+        tabElement.id = `tab-${tab.id}-btn`;
+        tabElement.textContent = tab.label;
+        tabElement.addEventListener('click', () => switchTab(tab.id));
+        tabsContainer.appendChild(tabElement);
+      });
+      
+      // Restore active tab from localStorage or default to first tab
+      const savedTab = localStorage.getItem('ctp-active-tab');
+      if (savedTab && document.getElementById(`tab-${savedTab}-btn`)) {
+        switchTab(savedTab);
+      } else {
+        switchTab('kokan');
+      }
+    }
+
+    // Switch to a specific tab
+    function switchTab(tabId) {
+      // Deactivate all tabs
+      const allTabs = document.querySelectorAll('.tab');
+      allTabs.forEach(tab => tab.classList.remove('active'));
+      
+      // Hide all tab contents
+      hideAllTabContents();
+      
+      // Activate selected tab
+      const selectedTab = document.getElementById(`tab-${tabId}-btn`);
+      if (selectedTab) {
+        selectedTab.classList.add('active');
+      }
+      
+      // Show selected tab content
+      const selectedContent = document.getElementById(`tab-${tabId}`);
+      if (selectedContent) {
+        selectedContent.classList.add('active');
+      }
+      
+      // Save active tab to localStorage
+      currentActiveTab = tabId;
+      localStorage.setItem('ctp-active-tab', tabId);
     }
 
     // Fetch default date from Google Sheets Settings
@@ -322,10 +467,11 @@
 
     // Render status cards from snapshot data
     function renderStatusCards(snapshotData) {
-      cardsContainer.innerHTML = '';
-
+      clearAllTabContents(); // Clear previous content to prevent duplicates
+      
       if (!snapshotData || !snapshotData.snapshot || !snapshotData.snapshot.status) {
-        cardsContainer.innerHTML = '<div class="error">No data available for this date</div>';
+        document.getElementById('tab-kokan').innerHTML = '<div class="error">No data available for this date</div>';
+        document.getElementById('tab-kokan').classList.add('active');
         return;
       }
 
@@ -346,8 +492,57 @@
         return fullFileName;
       }
 
-      // Render each edition
+      // Check if we have pullout data
+      const hasPulloutData = snapshot.status.hasOwnProperty('05Pullout');
+      
+      // Add pullout tab if needed
+      if (hasPulloutData) {
+        const pulloutTabExists = document.getElementById('tab-pullout-btn');
+        if (!pulloutTabExists) {
+          const pulloutTab = document.createElement('button');
+          pulloutTab.className = 'tab';
+          pulloutTab.id = 'tab-pullout-btn';
+          pulloutTab.textContent = 'Pullout';
+          pulloutTab.addEventListener('click', () => switchTab('pullout'));
+          tabsContainer.appendChild(pulloutTab);
+        }
+      } else {
+        // Remove pullout tab if it exists but no data
+        const pulloutTab = document.getElementById('tab-pullout-btn');
+        if (pulloutTab) {
+          pulloutTab.remove();
+          // If pullout was active, switch to kokan
+          if (currentActiveTab === 'pullout') {
+            switchTab('kokan');
+          }
+        }
+      }
+
+      // Render each edition to its respective tab
       for (const editionKey in snapshot.status) {
+        let tabId;
+        
+        // Map edition keys to tab IDs
+        if (editionKey.includes('Kokan') || editionKey === '01Kokan') {
+          tabId = 'kokan';
+        } else if (editionKey.includes('Satara') || editionKey === '02Satara') {
+          tabId = 'satara';
+        } else if (editionKey.includes('Sangli') || editionKey === '03Sangli') {
+          tabId = 'sangli';
+        } else if (editionKey.includes('Kolhapur') || editionKey === '04Kolhapur') {
+          tabId = 'kolhapur';
+        } else if (editionKey.includes('Pullout') || editionKey === '05Pullout') {
+          tabId = 'pullout';
+        } else {
+          continue; // Skip unknown editions
+        }
+        
+        const tabContent = document.getElementById(`tab-${tabId}`);
+        if (!tabContent) continue;
+        
+        const rows = snapshot.status[editionKey];
+        
+        // Create card for this edition
         const card = document.createElement('div');
         card.className = 'card';
 
@@ -357,7 +552,6 @@
 
         const table = document.createElement('table');
         table.className = 'checklist-table';
-        const rows = snapshot.status[editionKey];
 
         rows.forEach(item => {
           // Group titles (e.g., "Main Issue", "Pullout")
@@ -423,62 +617,84 @@
         });
 
         card.appendChild(table);
-        cardsContainer.appendChild(card);
+        tabContent.appendChild(card);
+      }
+      
+      // Activate the previously active tab or first available tab
+      const activeTabElement = document.getElementById(`tab-${currentActiveTab}-btn`);
+      if (activeTabElement && document.getElementById(`tab-${currentActiveTab}`).children.length > 0) {
+        switchTab(currentActiveTab);
+      } else {
+        // Find first tab with content
+        const tabs = ['kokan', 'satara', 'sangli', 'kolhapur', 'pullout'];
+        for (const tabId of tabs) {
+          const tabContent = document.getElementById(`tab-${tabId}`);
+          if (tabContent && tabContent.children.length > 0) {
+            switchTab(tabId);
+            break;
+          }
+        }
       }
     }
 
     // Navigate to a specific date
-// Navigate to a specific date
-async function navigateToDate(index) {
-    if (index < 0 || index >= availableDates.length) return;
-    
-    currentDateIndex = index;
-    const datePrefix = availableDates[index];
-    
-    clearError();
-    showLoading(`Loading data for ${formatDisplayDate(datePrefix)}...`);
-    
-    try {
+    async function navigateToDate(index) {
+      if (index < 0 || index >= availableDates.length) return;
+      
+      currentDateIndex = index;
+      const datePrefix = availableDates[index];
+      
+      clearError();
+      showLoading(`Loading data for ${formatDisplayDate(datePrefix)}...`);
+      
+      try {
         const snapshotData = await loadSnapshotForDate(datePrefix);
         hideLoading();
         renderStatusCards(snapshotData);
         
         // Update navigation buttons
         updateNavigationButtons();
-    } catch (err) {
+      } catch (err) {
         hideLoading();
         showError(err.message);
+      }
     }
-}
 
-// Update navigation buttons state - CORRECTED BEHAVIOR
-function updateNavigationButtons() {
-    // Left arrow button (←) disabled when at the most recent date (last index)
-    prevDateBtn.disabled = currentDateIndex >= availableDates.length - 1;
-    // Right arrow button (→) disabled when at the oldest date (index 0)
-    nextDateBtn.disabled = currentDateIndex <= 0;
-}
-
-// Event listeners for navigation - CORRECTED BEHAVIOR
-prevDateBtn.addEventListener('click', () => {
-    // Left arrow button (←) - go to previous (older) date
-    if (currentDateIndex < availableDates.length - 1) {
-        navigateToDate(currentDateIndex + 1);
-    }
-});
-
-nextDateBtn.addEventListener('click', () => {
-    // Right arrow button (→) - go to next (more recent) date
-    if (currentDateIndex > 0) {
-        navigateToDate(currentDateIndex - 1);
-    }
-});
-    // Update navigation buttons state - SWAPPED BUTTONS
+    // Update navigation buttons state
     function updateNavigationButtons() {
-      // → Right arrow button disabled when at the most recent date (last index)
+      // Left arrow button (←) disabled when at the most recent date (last index)
       prevDateBtn.disabled = currentDateIndex >= availableDates.length - 1;
-      // ← Left arrow button disabled when at the oldest date (index 0)
+      // Right arrow button (→) disabled when at the oldest date (index 0)
       nextDateBtn.disabled = currentDateIndex <= 0;
+    }
+
+    // Start automatic synchronization
+    function startAutoSync() {
+      // Clear any existing interval
+      if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+      }
+      
+      // Set up new interval for syncing every 10 seconds
+      syncIntervalId = setInterval(async () => {
+        if (currentDateIndex >= 0 && currentDateIndex < availableDates.length) {
+          try {
+            const datePrefix = availableDates[currentDateIndex];
+            const snapshotData = await loadSnapshotForDate(datePrefix);
+            renderStatusCards(snapshotData);
+          } catch (err) {
+            console.warn('Auto-sync failed:', err.message);
+          }
+        }
+      }, 10000); // 10 seconds
+    }
+
+    // Stop automatic synchronization
+    function stopAutoSync() {
+      if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+        syncIntervalId = null;
+      }
     }
 
     // Find index of a date in available dates array
@@ -490,6 +706,9 @@ nextDateBtn.addEventListener('click', () => {
     async function initializeViewer() {
       try {
         showLoading('Loading default date...');
+        
+        // Initialize tabs
+        initializeTabs();
         
         // 1. Get default date from Settings sheet
         const defaultDate = await fetchDefaultDate();
@@ -513,22 +732,25 @@ nextDateBtn.addEventListener('click', () => {
         // 4. Load the target date
         await navigateToDate(targetDateIndex);
         
+        // 5. Start auto-sync
+        startAutoSync();
+        
       } catch (err) {
         hideLoading();
         showError('Failed to initialize: ' + err.message);
       }
     }
 
-    // Event listeners for navigation - SWAPPED BUTTONS
+    // Event listeners for navigation
     prevDateBtn.addEventListener('click', () => {
-      // → Right arrow button - go to next (more recent) date
+      // Left arrow button (←) - go to previous (older) date
       if (currentDateIndex < availableDates.length - 1) {
         navigateToDate(currentDateIndex + 1);
       }
     });
 
     nextDateBtn.addEventListener('click', () => {
-      // ← Left arrow button - go to previous (older) date
+      // Right arrow button (→) - go to next (more recent) date
       if (currentDateIndex > 0) {
         navigateToDate(currentDateIndex - 1);
       }
@@ -536,6 +758,11 @@ nextDateBtn.addEventListener('click', () => {
 
     // Initialize when page loads
     document.addEventListener('DOMContentLoaded', initializeViewer);
+    
+    // Clean up on page unload
+    window.addEventListener('beforeunload', () => {
+      stopAutoSync();
+    });
   </script>
 </body>
 </html>
