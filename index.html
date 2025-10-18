@@ -286,12 +286,12 @@
 
   <script>
     // Configuration - Hardcoded GAS URL
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbwV5skyCKQmLDZszaXTjGj-LaW-DWTcODRQjw3JUFIWs3b9Tz1_LjROx4SGsnPIJ7i3gQ/exec";
+    GAS_URL = "https://script.google.com/macros/s/AKfycbzFU7d6Eay5oHnkogqprfoAA2jKbWDMsKJSwl8H3iNv0XsZEkhwDrZ80toBITHxmqQO/exec"
     let availableDates = [];
     let currentDateIndex = -1;
     let currentDatePrefix = '';
     let syncIntervalId = null;
-    let currentActiveTab = 'kokan'; // Track current active tab
+    let currentActiveTab = 'kokan';
 
     // DOM Elements
     const prevDateBtn = document.getElementById('prev-date-btn');
@@ -350,7 +350,8 @@
         { id: 'kokan', label: 'Kokan' },
         { id: 'satara', label: 'Satara' },
         { id: 'sangli', label: 'Sangli' },
-        { id: 'kolhapur', label: 'Kolhapur' }
+        { id: 'kolhapur', label: 'Kolhapur' },
+        { id: 'pullout', label: 'Pullout' }
       ];
       
       tabsContainer.innerHTML = '';
@@ -452,7 +453,7 @@
           // Return both the snapshot data AND the date from column A
           return {
             snapshot: JSON.parse(json.page_log_json || "{}"),
-            datePrefix: json.date_prefix // This comes from column A
+            datePrefix: json.date_prefix
           };
         } else if (json.status === 'not_found') {
           throw new Error('No snapshot found for this date');
@@ -466,155 +467,196 @@
     }
 
     // CORRECTED: Process the unified status structure from Column C
-    // CORRECTED: Process the unified status structure from Column C with proper issue ordering
-    function processUnifiedStatus(unifiedStatus, datePrefix) {
-      const editionStructure = {
+// CORRECTED: Process the unified status structure from Column C
+function processUnifiedStatus(unifiedStatus, datePrefix) {
+    console.log('Processing unified status:', unifiedStatus);
+    
+    const editionStructure = {
         '01Kokan': [],
         '02Satara': [],
         '03Sangli': [],
         '04Kolhapur': [],
         '05Pullout': []
-      };
+    };
 
-      if (!unifiedStatus || !unifiedStatus.status) {
+    if (!unifiedStatus || !unifiedStatus.status) {
+        console.log('No status data found in unifiedStatus');
         return editionStructure;
-      }
+    }
 
-      const statusData = unifiedStatus.status;
-      
-      // Helper to determine edition from filename
-      function getEditionFromFilename(filename) {
-        if (filename.includes('RTN') || filename.includes('RTH') || filename.includes('SDH')) {
-          return '01Kokan';
-        } else if (filename.includes('SAT') || filename.includes('STH') || filename.includes('PHL') || filename.includes('KRD') || filename.includes('WKM')) {
-          return '02Satara';
-        } else if (filename.includes('SNG') || filename.includes('SNH')) {
-          return '03Sangli';
-        } else if (filename.includes('KOL') || filename.includes('KHK') || filename.includes('KHD') || filename.includes('MNTH')) {
-          return '04Kolhapur';
-        } else if (filename.includes('PUL')) {
-          return '05Pullout';
-        }
-        return null;
-      }
+    const statusData = unifiedStatus.status;
+    console.log('Status data keys:', Object.keys(statusData));
+    
+    // Group files by edition and issue type
+    const filesByEditionAndIssue = {};
 
-      // Helper to get issue type from filename with proper ordering
-      function getIssueType(filename) {
-        // Main Issues first
-        if (filename.includes('LK-RTN') || filename.includes('LK-SAT') || 
-            filename.includes('LK-SNG') || filename.includes('LK-KOL')) {
-          return 'Main Issue';
-        }
-        // Hello Issues second
-        if (filename.includes('RTH')) return 'Ratnagiri Hello';
-        if (filename.includes('SDH')) return 'Sindhudurg Hello';
-        if (filename.includes('STH')) return 'Hello Issue';
-        if (filename.includes('SNH')) return 'Hello Issue';
-        if (filename.includes('KHK')) return 'City Hello';
-        if (filename.includes('KHD')) return 'District Hello (Rare)';
-        if (filename.includes('PUL')) return 'Pullout';
-        if (filename.includes('MNTH')) return 'Saransh Issue (Sunday)';
-        return 'Other Issue';
-      }
+    for (const filename in statusData) {
+        const fileData = statusData[filename];
+        
+        // Skip if no meaningful data
+        if (!fileData) continue;
+        
+        console.log('Processing file:', filename, fileData);
 
-      // Helper to extract prefix from filename
-      function getPrefixFromFilename(filename) {
+        // Determine edition from filename
+        let edition = '';
+        let issueType = 'Other Issue';
+        let prefix = '';
+
+        // Extract prefix from filename
         const parts = filename.split('-');
         if (parts.length >= 3) {
-          return parts[1] + '-' + parts[2];
+            prefix = parts[1] + '-' + parts[2];
+        } else {
+            prefix = filename.replace('.pdf', '');
         }
-        return filename;
-      }
 
-      // Helper to get sort order for issues (Main Issue first, then Hello Issues)
-      function getIssueSortOrder(issueType) {
-        const order = {
-          'Main Issue': 1,
-          'Ratnagiri Hello': 2,
-          'Sindhudurg Hello': 3,
-          'Hello Issue': 4,
-          'City Hello': 5,
-          'District Hello (Rare)': 6,
-          'Saransh Issue (Sunday)': 7,
-          'Pullout': 8,
-          'Other Issue': 9
-        };
-        return order[issueType] || 10;
-      }
+        // IDENTIFY PULLOUT FILES FIRST - This is the key fix
+        if (filename.includes('PUL-')) {
+            edition = '05Pullout';
+            
+            // Determine specific pullout type
+            if (filename.includes('KHK')) {
+                issueType = 'Kolhapur-City Pullout';
+            } else if (filename.includes('KHD')) {
+                issueType = 'Kolhapur-District Pullout';
+            } else if (filename.includes('RTH')) {
+                issueType = 'Kokan-Ratnagiri Pullout';
+            } else if (filename.includes('SDH')) {
+                issueType = 'Kokan-Sindhudurg Pullout';
+            } else if (filename.includes('SNH')) {
+                issueType = 'Sangli Pullout';
+            } else if (filename.includes('PHL')) {
+                issueType = 'Satara-Phaltan Pullout';
+            } else if (filename.includes('KRD')) {
+                issueType = 'Satara-Karad Pullout';
+            } else if (filename.includes('WKM')) {
+                issueType = 'Satara-Wai Pullout';
+            } else if (filename.includes('MNTH')) {
+                issueType = 'Saransh Issue (Sunday)';
+            } else {
+                issueType = 'Pullout';
+            }
+        }
+        // Regular edition files
+        else if (filename.includes('RTN') || filename.includes('RTH') || filename.includes('SDH')) {
+            edition = '01Kokan';
+            if (filename.includes('LK-RTN')) issueType = 'Main Issue';
+            else if (filename.includes('RTH')) issueType = 'Ratnagiri Hello';
+            else if (filename.includes('SDH')) issueType = 'Sindhudurg Hello';
+        } else if (filename.includes('SAT') || filename.includes('STH')) {
+            edition = '02Satara';
+            if (filename.includes('LK-SAT')) issueType = 'Main Issue';
+            else if (filename.includes('STH')) issueType = 'Hello Issue';
+        } else if (filename.includes('SNG') || filename.includes('SNH')) {
+            edition = '03Sangli';
+            if (filename.includes('LK-SNG')) issueType = 'Main Issue';
+            else if (filename.includes('SNH')) issueType = 'Hello Issue';
+        } else if (filename.includes('KOL') || filename.includes('KHK') || filename.includes('KHD')) {
+            edition = '04Kolhapur';
+            if (filename.includes('LK-KOL')) issueType = 'Main Issue';
+            else if (filename.includes('KHK')) issueType = 'City Hello';
+            else if (filename.includes('KHD')) issueType = 'District Hello (Rare)';
+        } else {
+            // Skip files that don't match any known pattern
+            console.log('Skipping unknown file:', filename);
+            continue;
+        }
 
-      // Group files by edition and issue type
-      const filesByEditionAndIssue = {};
+        console.log(`File ${filename} -> Edition: ${edition}, Issue: ${issueType}`);
 
-      for (const filename in statusData) {
-        const edition = getEditionFromFilename(filename);
-        if (!edition) continue;
-
-        const issueType = getIssueType(filename);
-        const prefix = getPrefixFromFilename(filename);
-        
+        // Initialize edition and issue type in our structure
         if (!filesByEditionAndIssue[edition]) {
-          filesByEditionAndIssue[edition] = {};
+            filesByEditionAndIssue[edition] = {};
         }
         if (!filesByEditionAndIssue[edition][issueType]) {
-          filesByEditionAndIssue[edition][issueType] = {
-            prefix: prefix,
-            files: []
-          };
+            filesByEditionAndIssue[edition][issueType] = {
+                prefix: prefix,
+                files: []
+            };
         }
 
+        // Add file to the appropriate group
         filesByEditionAndIssue[edition][issueType].files.push({
-          filename: filename,
-          data: statusData[filename]
+            filename: filename,
+            data: fileData
         });
-      }
+    }
 
-      // Build the edition structure with section titles in proper order
-      for (const edition in filesByEditionAndIssue) {
+    console.log('Files grouped by edition and issue:', filesByEditionAndIssue);
+
+    // Build the edition structure with section titles
+    for (const edition in filesByEditionAndIssue) {
         // Get all issue types for this edition and sort them
         const issueTypes = Object.keys(filesByEditionAndIssue[edition]);
-        issueTypes.sort((a, b) => getIssueSortOrder(a) - getIssueSortOrder(b));
+        
+        // Sort issue types: Main Issue first, then Hello issues, then others
+        issueTypes.sort((a, b) => {
+            const order = {
+                'Main Issue': 1,
+                'Ratnagiri Hello': 2,
+                'Sindhudurg Hello': 3,
+                'Hello Issue': 4,
+                'City Hello': 5,
+                'District Hello (Rare)': 6,
+                'Saransh Issue (Sunday)': 7,
+                'Kolhapur-City Pullout': 8,
+                'Kolhapur-District Pullout': 9,
+                'Kokan-Ratnagiri Pullout': 10,
+                'Kokan-Sindhudurg Pullout': 11,
+                'Sangli Pullout': 12,
+                'Satara-Phaltan Pullout': 13,
+                'Satara-Karad Pullout': 14,
+                'Satara-Wai Pullout': 15,
+                'Pullout': 16,
+                'Other Issue': 99
+            };
+            return (order[a] || 100) - (order[b] || 100);
+        });
 
         // Add issues in sorted order
         for (const issueType of issueTypes) {
-          const issueData = filesByEditionAndIssue[edition][issueType];
-          const pageCount = issueData.files.length;
-          
-          // Add section title
-          editionStructure[edition].push({
-            type: edition === '05Pullout' ? 'pullout_title' : 'section_title',
-            text: `${issueType} (${pageCount} Pages) - ${issueData.prefix}`
-          });
-
-          // Sort files by page number (extract page number from filename)
-          issueData.files.sort((a, b) => {
-            const pageNumA = parseInt(a.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
-            const pageNumB = parseInt(b.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
-            return pageNumA - pageNumB;
-          });
-
-          // Add files in page order
-          issueData.files.forEach(fileInfo => {
+            const issueData = filesByEditionAndIssue[edition][issueType];
+            const pageCount = issueData.files.length;
+            
+            // Add section title
+            const isPullout = edition === '05Pullout';
             editionStructure[edition].push({
-              file: fileInfo.filename,
-              title: fileInfo.data.title || '',
-              edit: fileInfo.data.edit || '',
-              icd: fileInfo.data.icd || '',
-              ok: fileInfo.data.ok || false,
-              time: fileInfo.data.time || 'N/A'
+                type: isPullout ? 'pullout_title' : 'section_title',
+                text: `${issueType} (${pageCount} Pages) - ${issueData.prefix}`
             });
-          });
-        }
-      }
 
-      // Remove empty editions
-      Object.keys(editionStructure).forEach(edition => {
-        if (editionStructure[edition].length === 0) {
-          delete editionStructure[edition];
-        }
-      });
+            // Sort files by page number
+            issueData.files.sort((a, b) => {
+                const pageNumA = parseInt(a.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
+                const pageNumB = parseInt(b.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
+                return pageNumA - pageNumB;
+            });
 
-      return editionStructure;
+            // Add files in page order
+            issueData.files.forEach(fileInfo => {
+                editionStructure[edition].push({
+                    file: fileInfo.filename,
+                    title: fileInfo.data.title || '',
+                    edit: fileInfo.data.edit || '',
+                    icd: fileInfo.data.icd || '',
+                    ok: fileInfo.data.ok || false,
+                    time: fileInfo.data.time || 'N/A'
+                });
+            });
+        }
     }
+
+    // Remove empty editions
+    Object.keys(editionStructure).forEach(edition => {
+        if (editionStructure[edition].length === 0) {
+            delete editionStructure[edition];
+        }
+    });
+
+    console.log('Final edition structure:', editionStructure);
+    return editionStructure;
+}
 
     // CORRECTED: Render status cards from processed data
     function renderStatusCards(snapshotData) {
@@ -636,40 +678,35 @@
       const editionStructure = processUnifiedStatus(snapshot, datePrefix);
 
       // Helper function to convert the full filename to abbreviated version
-      function getAbbreviatedFilename(fullFileName) {
-        const parts = fullFileName.split('-');
-        if (parts.length >= 2) {
-          let suffix = parts.slice(-2).join('-');
-          if (suffix.endsWith('.pdf')) suffix = suffix.slice(0, -4);
-          return suffix;
-        }
-        return fullFileName;
-      }
+		function getAbbreviatedFilename(fullFileName) {
+			const parts = fullFileName.split('-');
+			
+			// For pullout files, show specific abbreviations
+			if (fullFileName.includes('PUL-')) {
+				if (parts.length >= 4) {
+					// Format: P-KHK-01 (P for Pullout, then the specific code, then page number)
+					const pulloutCode = parts[2]; // KHK, KHD, RTH, etc.
+					const pageNum = parts[3].replace('.pdf', '');
+					return `P-${pulloutCode}-${pageNum}`;
+				}
+			}
+			
+			// For regular files
+			if (parts.length >= 3) {
+				let suffix = parts.slice(-2).join('-');
+				if (suffix.endsWith('.pdf')) suffix = suffix.slice(0, -4);
+				return suffix;
+			}
+			
+			return fullFileName;
+		}
 
-      // Check if we have pullout data
-      const hasPulloutData = editionStructure.hasOwnProperty('05Pullout');
+      // Check if we have pullout data and update tab visibility
+      const hasPulloutData = editionStructure.hasOwnProperty('05Pullout') && editionStructure['05Pullout'].length > 0;
+      const pulloutTab = document.getElementById('tab-pullout-btn');
       
-      // Add pullout tab if needed
-      if (hasPulloutData) {
-        const pulloutTabExists = document.getElementById('tab-pullout-btn');
-        if (!pulloutTabExists) {
-          const pulloutTab = document.createElement('button');
-          pulloutTab.className = 'tab';
-          pulloutTab.id = 'tab-pullout-btn';
-          pulloutTab.textContent = 'Pullout';
-          pulloutTab.addEventListener('click', () => switchTab('pullout'));
-          tabsContainer.appendChild(pulloutTab);
-        }
-      } else {
-        // Remove pullout tab if it exists but no data
-        const pulloutTab = document.getElementById('tab-pullout-btn');
-        if (pulloutTab) {
-          pulloutTab.remove();
-          // If pullout was active, switch to kokan
-          if (currentActiveTab === 'pullout') {
-            switchTab('kokan');
-          }
-        }
+      if (pulloutTab) {
+        pulloutTab.style.display = hasPulloutData ? 'flex' : 'none';
       }
 
       // Render each edition to its respective tab
@@ -695,7 +732,7 @@
         card.className = 'card';
 
         const title = document.createElement('h3');
-        title.textContent = editionKey;
+        title.textContent = editionKey.replace('01', '').replace('02', '').replace('03', '').replace('04', '').replace('05', '');
         card.appendChild(title);
 
         const table = document.createElement('table');
@@ -767,17 +804,18 @@
         card.appendChild(table);
         tabContent.appendChild(card);
       }
-      
+
       // Activate the previously active tab or first available tab
       const activeTabElement = document.getElementById(`tab-${currentActiveTab}-btn`);
-      if (activeTabElement && document.getElementById(`tab-${currentActiveTab}`).children.length > 0) {
+      if (activeTabElement && activeTabElement.style.display !== 'none' && document.getElementById(`tab-${currentActiveTab}`).children.length > 0) {
         switchTab(currentActiveTab);
       } else {
         // Find first tab with content
         const tabs = ['kokan', 'satara', 'sangli', 'kolhapur', 'pullout'];
         for (const tabId of tabs) {
+          const tabBtn = document.getElementById(`tab-${tabId}-btn`);
           const tabContent = document.getElementById(`tab-${tabId}`);
-          if (tabContent && tabContent.children.length > 0) {
+          if (tabBtn && tabBtn.style.display !== 'none' && tabContent && tabContent.children.length > 0) {
             switchTab(tabId);
             break;
           }
@@ -823,7 +861,7 @@
         clearInterval(syncIntervalId);
       }
       
-      // Set up new interval for syncing every 10 seconds
+      // Set up new interval for syncing every 30 seconds
       syncIntervalId = setInterval(async () => {
         if (currentDateIndex >= 0 && currentDateIndex < availableDates.length) {
           try {
@@ -834,7 +872,7 @@
             console.warn('Auto-sync failed:', err.message);
           }
         }
-      }, 10000); // 10 seconds
+      }, 30000);
     }
 
     // Stop automatic synchronization
