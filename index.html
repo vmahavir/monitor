@@ -466,6 +466,7 @@
     }
 
     // CORRECTED: Process the unified status structure from Column C
+    // CORRECTED: Process the unified status structure from Column C with proper issue ordering
     function processUnifiedStatus(unifiedStatus, datePrefix) {
       const editionStructure = {
         '01Kokan': [],
@@ -497,8 +498,14 @@
         return null;
       }
 
-      // Helper to get issue type from filename
+      // Helper to get issue type from filename with proper ordering
       function getIssueType(filename) {
+        // Main Issues first
+        if (filename.includes('LK-RTN') || filename.includes('LK-SAT') || 
+            filename.includes('LK-SNG') || filename.includes('LK-KOL')) {
+          return 'Main Issue';
+        }
+        // Hello Issues second
         if (filename.includes('RTH')) return 'Ratnagiri Hello';
         if (filename.includes('SDH')) return 'Sindhudurg Hello';
         if (filename.includes('STH')) return 'Hello Issue';
@@ -507,7 +514,7 @@
         if (filename.includes('KHD')) return 'District Hello (Rare)';
         if (filename.includes('PUL')) return 'Pullout';
         if (filename.includes('MNTH')) return 'Saransh Issue (Sunday)';
-        return 'Main Issue';
+        return 'Other Issue';
       }
 
       // Helper to extract prefix from filename
@@ -517,6 +524,22 @@
           return parts[1] + '-' + parts[2];
         }
         return filename;
+      }
+
+      // Helper to get sort order for issues (Main Issue first, then Hello Issues)
+      function getIssueSortOrder(issueType) {
+        const order = {
+          'Main Issue': 1,
+          'Ratnagiri Hello': 2,
+          'Sindhudurg Hello': 3,
+          'Hello Issue': 4,
+          'City Hello': 5,
+          'District Hello (Rare)': 6,
+          'Saransh Issue (Sunday)': 7,
+          'Pullout': 8,
+          'Other Issue': 9
+        };
+        return order[issueType] || 10;
       }
 
       // Group files by edition and issue type
@@ -545,9 +568,14 @@
         });
       }
 
-      // Build the edition structure with section titles
+      // Build the edition structure with section titles in proper order
       for (const edition in filesByEditionAndIssue) {
-        for (const issueType in filesByEditionAndIssue[edition]) {
+        // Get all issue types for this edition and sort them
+        const issueTypes = Object.keys(filesByEditionAndIssue[edition]);
+        issueTypes.sort((a, b) => getIssueSortOrder(a) - getIssueSortOrder(b));
+
+        // Add issues in sorted order
+        for (const issueType of issueTypes) {
           const issueData = filesByEditionAndIssue[edition][issueType];
           const pageCount = issueData.files.length;
           
@@ -557,7 +585,14 @@
             text: `${issueType} (${pageCount} Pages) - ${issueData.prefix}`
           });
 
-          // Add files
+          // Sort files by page number (extract page number from filename)
+          issueData.files.sort((a, b) => {
+            const pageNumA = parseInt(a.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
+            const pageNumB = parseInt(b.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
+            return pageNumA - pageNumB;
+          });
+
+          // Add files in page order
           issueData.files.forEach(fileInfo => {
             editionStructure[edition].push({
               file: fileInfo.filename,
