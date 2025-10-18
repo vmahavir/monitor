@@ -451,7 +451,7 @@
         if (json.status === 'success') {
           // Return both the snapshot data AND the date from column A
           return {
-            snapshot: JSON.parse(json.page_log_json),
+            snapshot: JSON.parse(json.page_log_json || "{}"),
             datePrefix: json.date_prefix // This comes from column A
           };
         } else if (json.status === 'not_found') {
@@ -465,11 +465,127 @@
       }
     }
 
-    // Render status cards from snapshot data
-    function renderStatusCards(snapshotData) {
-      clearAllTabContents(); // Clear previous content to prevent duplicates
+    // CORRECTED: Process the unified status structure from Column C
+    function processUnifiedStatus(unifiedStatus, datePrefix) {
+      const editionStructure = {
+        '01Kokan': [],
+        '02Satara': [],
+        '03Sangli': [],
+        '04Kolhapur': [],
+        '05Pullout': []
+      };
+
+      if (!unifiedStatus || !unifiedStatus.status) {
+        return editionStructure;
+      }
+
+      const statusData = unifiedStatus.status;
       
-      if (!snapshotData || !snapshotData.snapshot || !snapshotData.snapshot.status) {
+      // Helper to determine edition from filename
+      function getEditionFromFilename(filename) {
+        if (filename.includes('RTN') || filename.includes('RTH') || filename.includes('SDH')) {
+          return '01Kokan';
+        } else if (filename.includes('SAT') || filename.includes('STH') || filename.includes('PHL') || filename.includes('KRD') || filename.includes('WKM')) {
+          return '02Satara';
+        } else if (filename.includes('SNG') || filename.includes('SNH')) {
+          return '03Sangli';
+        } else if (filename.includes('KOL') || filename.includes('KHK') || filename.includes('KHD') || filename.includes('MNTH')) {
+          return '04Kolhapur';
+        } else if (filename.includes('PUL')) {
+          return '05Pullout';
+        }
+        return null;
+      }
+
+      // Helper to get issue type from filename
+      function getIssueType(filename) {
+        if (filename.includes('RTH')) return 'Ratnagiri Hello';
+        if (filename.includes('SDH')) return 'Sindhudurg Hello';
+        if (filename.includes('STH')) return 'Hello Issue';
+        if (filename.includes('SNH')) return 'Hello Issue';
+        if (filename.includes('KHK')) return 'City Hello';
+        if (filename.includes('KHD')) return 'District Hello (Rare)';
+        if (filename.includes('PUL')) return 'Pullout';
+        if (filename.includes('MNTH')) return 'Saransh Issue (Sunday)';
+        return 'Main Issue';
+      }
+
+      // Helper to extract prefix from filename
+      function getPrefixFromFilename(filename) {
+        const parts = filename.split('-');
+        if (parts.length >= 3) {
+          return parts[1] + '-' + parts[2];
+        }
+        return filename;
+      }
+
+      // Group files by edition and issue type
+      const filesByEditionAndIssue = {};
+
+      for (const filename in statusData) {
+        const edition = getEditionFromFilename(filename);
+        if (!edition) continue;
+
+        const issueType = getIssueType(filename);
+        const prefix = getPrefixFromFilename(filename);
+        
+        if (!filesByEditionAndIssue[edition]) {
+          filesByEditionAndIssue[edition] = {};
+        }
+        if (!filesByEditionAndIssue[edition][issueType]) {
+          filesByEditionAndIssue[edition][issueType] = {
+            prefix: prefix,
+            files: []
+          };
+        }
+
+        filesByEditionAndIssue[edition][issueType].files.push({
+          filename: filename,
+          data: statusData[filename]
+        });
+      }
+
+      // Build the edition structure with section titles
+      for (const edition in filesByEditionAndIssue) {
+        for (const issueType in filesByEditionAndIssue[edition]) {
+          const issueData = filesByEditionAndIssue[edition][issueType];
+          const pageCount = issueData.files.length;
+          
+          // Add section title
+          editionStructure[edition].push({
+            type: edition === '05Pullout' ? 'pullout_title' : 'section_title',
+            text: `${issueType} (${pageCount} Pages) - ${issueData.prefix}`
+          });
+
+          // Add files
+          issueData.files.forEach(fileInfo => {
+            editionStructure[edition].push({
+              file: fileInfo.filename,
+              title: fileInfo.data.title || '',
+              edit: fileInfo.data.edit || '',
+              icd: fileInfo.data.icd || '',
+              ok: fileInfo.data.ok || false,
+              time: fileInfo.data.time || 'N/A'
+            });
+          });
+        }
+      }
+
+      // Remove empty editions
+      Object.keys(editionStructure).forEach(edition => {
+        if (editionStructure[edition].length === 0) {
+          delete editionStructure[edition];
+        }
+      });
+
+      return editionStructure;
+    }
+
+    // CORRECTED: Render status cards from processed data
+    function renderStatusCards(snapshotData) {
+      clearAllTabContents();
+      
+      if (!snapshotData || !snapshotData.snapshot) {
         document.getElementById('tab-kokan').innerHTML = '<div class="error">No data available for this date</div>';
         document.getElementById('tab-kokan').classList.add('active');
         return;
@@ -480,6 +596,9 @@
       // Update current date display with the date from column A
       currentDatePrefix = datePrefix;
       currentDateEl.textContent = formatDisplayDate(datePrefix);
+
+      // Process the unified status structure
+      const editionStructure = processUnifiedStatus(snapshot, datePrefix);
 
       // Helper function to convert the full filename to abbreviated version
       function getAbbreviatedFilename(fullFileName) {
@@ -493,7 +612,7 @@
       }
 
       // Check if we have pullout data
-      const hasPulloutData = snapshot.status.hasOwnProperty('05Pullout');
+      const hasPulloutData = editionStructure.hasOwnProperty('05Pullout');
       
       // Add pullout tab if needed
       if (hasPulloutData) {
@@ -519,28 +638,22 @@
       }
 
       // Render each edition to its respective tab
-      for (const editionKey in snapshot.status) {
-        let tabId;
-        
-        // Map edition keys to tab IDs
-        if (editionKey.includes('Kokan') || editionKey === '01Kokan') {
-          tabId = 'kokan';
-        } else if (editionKey.includes('Satara') || editionKey === '02Satara') {
-          tabId = 'satara';
-        } else if (editionKey.includes('Sangli') || editionKey === '03Sangli') {
-          tabId = 'sangli';
-        } else if (editionKey.includes('Kolhapur') || editionKey === '04Kolhapur') {
-          tabId = 'kolhapur';
-        } else if (editionKey.includes('Pullout') || editionKey === '05Pullout') {
-          tabId = 'pullout';
-        } else {
-          continue; // Skip unknown editions
-        }
+      const tabMapping = {
+        '01Kokan': 'kokan',
+        '02Satara': 'satara', 
+        '03Sangli': 'sangli',
+        '04Kolhapur': 'kolhapur',
+        '05Pullout': 'pullout'
+      };
+
+      for (const editionKey in editionStructure) {
+        const tabId = tabMapping[editionKey];
+        if (!tabId) continue;
         
         const tabContent = document.getElementById(`tab-${tabId}`);
         if (!tabContent) continue;
         
-        const rows = snapshot.status[editionKey];
+        const rows = editionStructure[editionKey];
         
         // Create card for this edition
         const card = document.createElement('div');
