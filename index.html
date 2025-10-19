@@ -83,7 +83,7 @@
       text-align: center;
     }
 
-    /* Tabs styling */
+    /* FIXED: Tabs styling - more compact for mobile */
     .tabs-container {
       display: flex;
       overflow-x: auto;
@@ -91,6 +91,7 @@
       border-radius: var(--border-radius);
       margin-bottom: var(--spacing-unit);
       scrollbar-width: none; /* Firefox */
+      padding: 0 2px; /* Reduced padding */
     }
     
     .tabs-container::-webkit-scrollbar {
@@ -99,16 +100,17 @@
     
     .tab {
       flex: 1;
-      min-width: 80px;
-      padding: 8px 12px;
+      min-width: 70px; /* Reduced from 80px */
+      padding: 6px 8px; /* Reduced padding */
       text-align: center;
       background: var(--color-bg-secondary);
       color: var(--color-text-dim);
       border: none;
       cursor: pointer;
-      font-size: 0.9em;
+      font-size: 0.85em; /* Smaller font */
       white-space: nowrap;
       transition: all 0.2s;
+      margin: 0 1px; /* Reduced margin */
     }
     
     .tab.active {
@@ -286,7 +288,7 @@
 
   <script>
     // Configuration - Hardcoded GAS URL
-    GAS_URL = "https://script.google.com/macros/s/AKfycbwV5skyCKQmLDZszaXTjGj-LaW-DWTcODRQjw3JUFIWs3b9Tz1_LjROx4SGsnPIJ7i3gQ/exec"
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbxaTd0L7JlpreqhoUBF9LmghLAPED3DRT_fkkSqu7vOLbxdFXUBztZtw05sslPuwWt0/exec";
     let availableDates = [];
     let currentDateIndex = -1;
     let currentDatePrefix = '';
@@ -441,56 +443,96 @@
       }
     }
 
-    // Load snapshot data for a specific date
-    async function loadSnapshotForDate(datePrefix) {
+    // Load edition-specific data for a specific date
+    async function loadEditionDataForDate(datePrefix, edition) {
       try {
-        const url = `${GAS_URL}?action=getSnapshot&date=${datePrefix}`;
+        const url = `${GAS_URL}?action=getEditionData&date=${datePrefix}&edition=${edition}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         
         const json = await res.json();
         if (json.status === 'success') {
-          // Return both the snapshot data AND the date from column A
+          let userData = {};
+          try {
+            userData = JSON.parse(json.user_data || "{}");
+          } catch (parseError) {
+            console.warn(`Failed to parse user_data for ${edition}:`, parseError);
+            userData = {};
+          }
+          
           return {
-            snapshot: JSON.parse(json.page_log_json || "{}"),
-            datePrefix: json.date_prefix
+            edition: edition,
+            user_data: userData,
+            saved_at: json.saved_at || ""
           };
-        } else if (json.status === 'not_found') {
-          throw new Error('No snapshot found for this date');
         } else {
-          throw new Error(json.message || 'Invalid snapshot data');
+          throw new Error(json.message || 'Invalid edition data response');
         }
       } catch (err) {
-        console.error('Failed to load snapshot:', err);
-        throw new Error(`Failed to load snapshot: ${err.message}`);
+        console.error(`Failed to load ${edition} data:`, err);
+        return {
+          edition: edition,
+          user_data: {},
+          saved_at: ""
+        };
       }
     }
 
-    // CORRECTED: Process the unified status structure from Column C
-// CORRECTED: Process the unified status structure from Column C
-function processUnifiedStatus(unifiedStatus, datePrefix) {
-    console.log('Processing unified status:', unifiedStatus);
-    
-    const editionStructure = {
+    // Load all edition data for a specific date and combine into unified structure
+    async function loadAllEditionData(datePrefix) {
+      const editions = ['01Kokan', '02Satara', '03Sangli', '04Kolhapur', '05Pullout'];
+      const promises = editions.map(edition => loadEditionDataForDate(datePrefix, edition));
+      
+      try {
+        const results = await Promise.all(promises);
+        const combinedData = {};
+        
+        // Combine all edition data into unified structure
+        results.forEach(result => {
+          if (result.user_data && typeof result.user_data === 'object') {
+            for (const [filename, fileData] of Object.entries(result.user_data)) {
+              combinedData[filename] = fileData;
+            }
+          }
+        });
+        
+        return {
+          snapshot: {
+            status: combinedData,
+            monitoring_date: datePrefix
+          },
+          datePrefix: datePrefix
+        };
+      } catch (err) {
+        console.error('Failed to load edition data:', err);
+        throw new Error(`Failed to load edition data: ${err.message}`);
+      }
+    }
+
+    // Process unified status data into display structure
+    function processUnifiedStatus(unifiedStatus, datePrefix) {
+      console.log('Processing unified status:', unifiedStatus);
+      
+      const editionStructure = {
         '01Kokan': [],
         '02Satara': [],
         '03Sangli': [],
         '04Kolhapur': [],
         '05Pullout': []
-    };
+      };
 
-    if (!unifiedStatus || !unifiedStatus.status) {
+      if (!unifiedStatus || !unifiedStatus.status) {
         console.log('No status data found in unifiedStatus');
         return editionStructure;
-    }
+      }
 
-    const statusData = unifiedStatus.status;
-    console.log('Status data keys:', Object.keys(statusData));
-    
-    // Group files by edition and issue type
-    const filesByEditionAndIssue = {};
+      const statusData = unifiedStatus.status;
+      console.log('Status data keys:', Object.keys(statusData));
+      
+      // Group files by edition and issue type
+      const filesByEditionAndIssue = {};
 
-    for (const filename in statusData) {
+      for (const filename in statusData) {
         const fileData = statusData[filename];
         
         // Skip if no meaningful data
@@ -506,159 +548,159 @@ function processUnifiedStatus(unifiedStatus, datePrefix) {
         // Extract prefix from filename
         const parts = filename.split('-');
         if (parts.length >= 3) {
-            prefix = parts[1] + '-' + parts[2];
+          prefix = parts[1] + '-' + parts[2];
         } else {
-            prefix = filename.replace('.pdf', '');
+          prefix = filename.replace('.pdf', '');
         }
 
-        // IDENTIFY PULLOUT FILES FIRST - This is the key fix
+        // IDENTIFY PULLOUT FILES FIRST
         if (filename.includes('PUL-')) {
-            edition = '05Pullout';
-            
-            // Determine specific pullout type
-            if (filename.includes('KHK')) {
-                issueType = 'Kolhapur-City Pullout';
-            } else if (filename.includes('KHD')) {
-                issueType = 'Kolhapur-District Pullout';
-            } else if (filename.includes('RTH')) {
-                issueType = 'Kokan-Ratnagiri Pullout';
-            } else if (filename.includes('SDH')) {
-                issueType = 'Kokan-Sindhudurg Pullout';
-            } else if (filename.includes('SNH')) {
-                issueType = 'Sangli Pullout';
-            } else if (filename.includes('PHL')) {
-                issueType = 'Satara-Phaltan Pullout';
-            } else if (filename.includes('KRD')) {
-                issueType = 'Satara-Karad Pullout';
-            } else if (filename.includes('WKM')) {
-                issueType = 'Satara-Wai Pullout';
-            } else if (filename.includes('MNTH')) {
-                issueType = 'Saransh Issue (Sunday)';
-            } else {
-                issueType = 'Pullout';
-            }
+          edition = '05Pullout';
+          
+          // Determine specific pullout type
+          if (filename.includes('KHK')) {
+            issueType = 'Kolhapur-City Pullout';
+          } else if (filename.includes('KHD')) {
+            issueType = 'Kolhapur-District Pullout';
+          } else if (filename.includes('RTH')) {
+            issueType = 'Kokan-Ratnagiri Pullout';
+          } else if (filename.includes('SDH')) {
+            issueType = 'Kokan-Sindhudurg Pullout';
+          } else if (filename.includes('SNH')) {
+            issueType = 'Sangli Pullout';
+          } else if (filename.includes('PHL')) {
+            issueType = 'Satara-Phaltan Pullout';
+          } else if (filename.includes('KRD')) {
+            issueType = 'Satara-Karad Pullout';
+          } else if (filename.includes('WKM')) {
+            issueType = 'Satara-Wai Pullout';
+          } else if (filename.includes('MNTH')) {
+            issueType = 'Saransh Issue (Sunday)';
+          } else {
+            issueType = 'Pullout';
+          }
         }
         // Regular edition files
         else if (filename.includes('RTN') || filename.includes('RTH') || filename.includes('SDH')) {
-            edition = '01Kokan';
-            if (filename.includes('LK-RTN')) issueType = 'Main Issue';
-            else if (filename.includes('RTH')) issueType = 'Ratnagiri Hello';
-            else if (filename.includes('SDH')) issueType = 'Sindhudurg Hello';
+          edition = '01Kokan';
+          if (filename.includes('LK-RTN')) issueType = 'Main Issue';
+          else if (filename.includes('RTH')) issueType = 'Ratnagiri Hello';
+          else if (filename.includes('SDH')) issueType = 'Sindhudurg Hello';
         } else if (filename.includes('SAT') || filename.includes('STH')) {
-            edition = '02Satara';
-            if (filename.includes('LK-SAT')) issueType = 'Main Issue';
-            else if (filename.includes('STH')) issueType = 'Hello Issue';
+          edition = '02Satara';
+          if (filename.includes('LK-SAT')) issueType = 'Main Issue';
+          else if (filename.includes('STH')) issueType = 'Hello Issue';
         } else if (filename.includes('SNG') || filename.includes('SNH')) {
-            edition = '03Sangli';
-            if (filename.includes('LK-SNG')) issueType = 'Main Issue';
-            else if (filename.includes('SNH')) issueType = 'Hello Issue';
+          edition = '03Sangli';
+          if (filename.includes('LK-SNG')) issueType = 'Main Issue';
+          else if (filename.includes('SNH')) issueType = 'Hello Issue';
         } else if (filename.includes('KOL') || filename.includes('KHK') || filename.includes('KHD')) {
-            edition = '04Kolhapur';
-            if (filename.includes('LK-KOL')) issueType = 'Main Issue';
-            else if (filename.includes('KHK')) issueType = 'City Hello';
-            else if (filename.includes('KHD')) issueType = 'District Hello (Rare)';
+          edition = '04Kolhapur';
+          if (filename.includes('LK-KOL')) issueType = 'Main Issue';
+          else if (filename.includes('KHK')) issueType = 'City Hello';
+          else if (filename.includes('KHD')) issueType = 'District Hello (Rare)';
         } else {
-            // Skip files that don't match any known pattern
-            console.log('Skipping unknown file:', filename);
-            continue;
+          // Skip files that don't match any known pattern
+          console.log('Skipping unknown file:', filename);
+          continue;
         }
 
         console.log(`File ${filename} -> Edition: ${edition}, Issue: ${issueType}`);
 
         // Initialize edition and issue type in our structure
         if (!filesByEditionAndIssue[edition]) {
-            filesByEditionAndIssue[edition] = {};
+          filesByEditionAndIssue[edition] = {};
         }
         if (!filesByEditionAndIssue[edition][issueType]) {
-            filesByEditionAndIssue[edition][issueType] = {
-                prefix: prefix,
-                files: []
-            };
+          filesByEditionAndIssue[edition][issueType] = {
+            prefix: prefix,
+            files: []
+          };
         }
 
         // Add file to the appropriate group
         filesByEditionAndIssue[edition][issueType].files.push({
-            filename: filename,
-            data: fileData
+          filename: filename,
+          data: fileData
         });
-    }
+      }
 
-    console.log('Files grouped by edition and issue:', filesByEditionAndIssue);
+      console.log('Files grouped by edition and issue:', filesByEditionAndIssue);
 
-    // Build the edition structure with section titles
-    for (const edition in filesByEditionAndIssue) {
+      // Build the edition structure with section titles
+      for (const edition in filesByEditionAndIssue) {
         // Get all issue types for this edition and sort them
         const issueTypes = Object.keys(filesByEditionAndIssue[edition]);
         
         // Sort issue types: Main Issue first, then Hello issues, then others
         issueTypes.sort((a, b) => {
-            const order = {
-                'Main Issue': 1,
-                'Ratnagiri Hello': 2,
-                'Sindhudurg Hello': 3,
-                'Hello Issue': 4,
-                'City Hello': 5,
-                'District Hello (Rare)': 6,
-                'Saransh Issue (Sunday)': 7,
-                'Kolhapur-City Pullout': 8,
-                'Kolhapur-District Pullout': 9,
-                'Kokan-Ratnagiri Pullout': 10,
-                'Kokan-Sindhudurg Pullout': 11,
-                'Sangli Pullout': 12,
-                'Satara-Phaltan Pullout': 13,
-                'Satara-Karad Pullout': 14,
-                'Satara-Wai Pullout': 15,
-                'Pullout': 16,
-                'Other Issue': 99
-            };
-            return (order[a] || 100) - (order[b] || 100);
+          const order = {
+            'Main Issue': 1,
+            'Ratnagiri Hello': 2,
+            'Sindhudurg Hello': 3,
+            'Hello Issue': 4,
+            'City Hello': 5,
+            'District Hello (Rare)': 6,
+            'Saransh Issue (Sunday)': 7,
+            'Kolhapur-City Pullout': 8,
+            'Kolhapur-District Pullout': 9,
+            'Kokan-Ratnagiri Pullout': 10,
+            'Kokan-Sindhudurg Pullout': 11,
+            'Sangli Pullout': 12,
+            'Satara-Phaltan Pullout': 13,
+            'Satara-Karad Pullout': 14,
+            'Satara-Wai Pullout': 15,
+            'Pullout': 16,
+            'Other Issue': 99
+          };
+          return (order[a] || 100) - (order[b] || 100);
         });
 
         // Add issues in sorted order
         for (const issueType of issueTypes) {
-            const issueData = filesByEditionAndIssue[edition][issueType];
-            const pageCount = issueData.files.length;
-            
-            // Add section title
-            const isPullout = edition === '05Pullout';
+          const issueData = filesByEditionAndIssue[edition][issueType];
+          const pageCount = issueData.files.length;
+          
+          // Add section title
+          const isPullout = edition === '05Pullout';
+          editionStructure[edition].push({
+            type: isPullout ? 'pullout_title' : 'section_title',
+            text: `${issueType} (${pageCount} Pages) - ${issueData.prefix}`
+          });
+
+          // Sort files by page number
+          issueData.files.sort((a, b) => {
+            const pageNumA = parseInt(a.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
+            const pageNumB = parseInt(b.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
+            return pageNumA - pageNumB;
+          });
+
+          // Add files in page order
+          issueData.files.forEach(fileInfo => {
             editionStructure[edition].push({
-                type: isPullout ? 'pullout_title' : 'section_title',
-                text: `${issueType} (${pageCount} Pages) - ${issueData.prefix}`
+              file: fileInfo.filename,
+              title: fileInfo.data.title || '',
+              edit: fileInfo.data.edit || '',
+              icd: fileInfo.data.icd || '',
+              ok: fileInfo.data.ok || false,
+              time: fileInfo.data.time || 'N/A'
             });
-
-            // Sort files by page number
-            issueData.files.sort((a, b) => {
-                const pageNumA = parseInt(a.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
-                const pageNumB = parseInt(b.filename.match(/-(\d+)\.pdf$/)?.[1] || '0');
-                return pageNumA - pageNumB;
-            });
-
-            // Add files in page order
-            issueData.files.forEach(fileInfo => {
-                editionStructure[edition].push({
-                    file: fileInfo.filename,
-                    title: fileInfo.data.title || '',
-                    edit: fileInfo.data.edit || '',
-                    icd: fileInfo.data.icd || '',
-                    ok: fileInfo.data.ok || false,
-                    time: fileInfo.data.time || 'N/A'
-                });
-            });
+          });
         }
+      }
+
+      // Remove empty editions
+      Object.keys(editionStructure).forEach(edition => {
+        if (editionStructure[edition].length === 0) {
+          delete editionStructure[edition];
+        }
+      });
+
+      console.log('Final edition structure:', editionStructure);
+      return editionStructure;
     }
 
-    // Remove empty editions
-    Object.keys(editionStructure).forEach(edition => {
-        if (editionStructure[edition].length === 0) {
-            delete editionStructure[edition];
-        }
-    });
-
-    console.log('Final edition structure:', editionStructure);
-    return editionStructure;
-}
-
-    // CORRECTED: Render status cards from processed data
+    // Render status cards from processed data
     function renderStatusCards(snapshotData) {
       clearAllTabContents();
       
@@ -678,28 +720,28 @@ function processUnifiedStatus(unifiedStatus, datePrefix) {
       const editionStructure = processUnifiedStatus(snapshot, datePrefix);
 
       // Helper function to convert the full filename to abbreviated version
-		function getAbbreviatedFilename(fullFileName) {
-			const parts = fullFileName.split('-');
-			
-			// For pullout files, show specific abbreviations
-			if (fullFileName.includes('PUL-')) {
-				if (parts.length >= 4) {
-					// Format: P-KHK-01 (P for Pullout, then the specific code, then page number)
-					const pulloutCode = parts[2]; // KHK, KHD, RTH, etc.
-					const pageNum = parts[3].replace('.pdf', '');
-					return `P-${pulloutCode}-${pageNum}`;
-				}
-			}
-			
-			// For regular files
-			if (parts.length >= 3) {
-				let suffix = parts.slice(-2).join('-');
-				if (suffix.endsWith('.pdf')) suffix = suffix.slice(0, -4);
-				return suffix;
-			}
-			
-			return fullFileName;
-		}
+      function getAbbreviatedFilename(fullFileName) {
+        const parts = fullFileName.split('-');
+        
+        // For pullout files, show specific abbreviations
+        if (fullFileName.includes('PUL-')) {
+          if (parts.length >= 4) {
+            // Format: P-KHK-01 (P for Pullout, then the specific code, then page number)
+            const pulloutCode = parts[2]; // KHK, KHD, RTH, etc.
+            const pageNum = parts[3].replace('.pdf', '');
+            return `P-${pulloutCode}-${pageNum}`;
+          }
+        }
+        
+        // For regular files
+        if (parts.length >= 3) {
+          let suffix = parts.slice(-2).join('-');
+          if (suffix.endsWith('.pdf')) suffix = suffix.slice(0, -4);
+          return suffix;
+        }
+        
+        return fullFileName;
+      }
 
       // Check if we have pullout data and update tab visibility
       const hasPulloutData = editionStructure.hasOwnProperty('05Pullout') && editionStructure['05Pullout'].length > 0;
@@ -834,7 +876,8 @@ function processUnifiedStatus(unifiedStatus, datePrefix) {
       showLoading(`Loading data for ${formatDisplayDate(datePrefix)}...`);
       
       try {
-        const snapshotData = await loadSnapshotForDate(datePrefix);
+        // Use edition-specific data loading
+        const snapshotData = await loadAllEditionData(datePrefix);
         hideLoading();
         renderStatusCards(snapshotData);
         
@@ -866,7 +909,8 @@ function processUnifiedStatus(unifiedStatus, datePrefix) {
         if (currentDateIndex >= 0 && currentDateIndex < availableDates.length) {
           try {
             const datePrefix = availableDates[currentDateIndex];
-            const snapshotData = await loadSnapshotForDate(datePrefix);
+            // Use edition-specific data loading
+            const snapshotData = await loadAllEditionData(datePrefix);
             renderStatusCards(snapshotData);
           } catch (err) {
             console.warn('Auto-sync failed:', err.message);
