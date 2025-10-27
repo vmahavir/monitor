@@ -19,8 +19,9 @@
       --color-issue-text: #66cc66;
       --color-edition-title-bg: #0077b6;
       --color-section-title-bg: #33333d;
-      --color-status-ok: #2a9d8f;
-      --color-status-fail: #e76f51;
+      --color-status-ok: #1cc88a;
+      --color-status-fail: #f6c23e;
+      --color-status-wait: #e74a3b;
       --color-section-title: #f8f9fa;
       --color-border: #33333d;
       --border-radius: 3px;
@@ -207,19 +208,25 @@
       background: #3d3345;
     }
 
+    /* STATUS DOTS - CORRECTED COLORS */
     .status-dot {
       display: inline-block;
-      width: 8px;
-      height: 8px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
+      vertical-align: middle;
     }
     
     .status-ok { 
-      background-color: var(--color-status-ok); 
+      background-color: var(--color-status-ok); /* Green */
     }
     
-    .status-fail { 
-      background-color: var(--color-status-fail); 
+    .status-no { 
+      background-color: var(--color-status-fail); /* Red */
+    }
+    
+    .status-wait { 
+      background-color: var(--color-status-wait); /* Yellow */
     }
 
     .error {
@@ -288,7 +295,7 @@
 
   <script>
     // Configuration - Hardcoded GAS URL
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbxQtyVbVGajdTpEZ989Wl64auCRZeB4iyoQGn7gqVwWSTL8xJ-w45qCTwvfdUcYS2S5/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbwdQS74XocwdoPNO5EhaHzvamil3BtQLZFKHkylngLxIPmNlMeS9gYLYEyMSioqbr-g/exec";
     let availableDates = [];
     let currentDateIndex = -1;
     let currentDatePrefix = '';
@@ -400,6 +407,16 @@
       // Save active tab to localStorage
       currentActiveTab = tabId;
       localStorage.setItem('ctp-active-tab', tabId);
+    }
+
+    // CORRECTED: Render status dot based on status value
+    function renderStatusDot(status) {
+      if (!status) status = "Wait";
+      const s = status.toLowerCase();
+      let cls = "status-wait";
+      if (s === "ok") cls = "status-ok";
+      else if (s === "no") cls = "status-no";
+      return `<span class="status-dot ${cls}" title="${status}"></span>`;
     }
 
     // Fetch default date from Google Sheets Settings
@@ -682,7 +699,7 @@
               title: fileInfo.data.title || '',
               edit: fileInfo.data.edit || '',
               icd: fileInfo.data.icd || '',
-              ok: fileInfo.data.ok || false,
+              ok: fileInfo.data.ok || "Wait", // Default to "Wait" if not set
               time: fileInfo.data.time || 'N/A'
             });
           });
@@ -819,18 +836,15 @@
             icdTd.className = 'icd-col';
             icdTd.textContent = item.icd || '';
 
-            // Status
+            // CORRECTED: Status with proper dot colors
             const statusTd = document.createElement('td');
             statusTd.className = 'status-col';
-            const dot = document.createElement('span');
-            dot.className = 'status-dot';
-            dot.classList.add(item.ok ? 'status-ok' : 'status-fail');
-            statusTd.appendChild(dot);
+            statusTd.innerHTML = renderStatusDot(item.ok);
 
             // Time
             const timeTd = document.createElement('td');
             timeTd.className = 'time-col';
-            timeTd.textContent = item.ok ? item.time : 'N/A';
+            timeTd.textContent = item.ok === "OK" ? (item.time || 'N/A') : 'N/A';
 
             // Append all columns
             tr.appendChild(fileTd);
