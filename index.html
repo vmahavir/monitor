@@ -548,9 +548,17 @@
           let cdPagesData = {};
           if (json.centraldesk_data) {
             try {
+              // Try to parse as JSON first
               cdPagesData = JSON.parse(json.centraldesk_data);
             } catch (parseError) {
-              console.error('Failed to parse centraldesk_data:', parseError);
+              console.error('Failed to parse centraldesk_data as JSON:', parseError);
+              // If JSON parsing fails, try to handle as string data
+              // This handles the case where the data is already in the format we need
+              if (typeof json.centraldesk_data === 'object') {
+                cdPagesData = json.centraldesk_data;
+              } else {
+                console.log('Central desk data is not in expected format:', json.centraldesk_data);
+              }
             }
           }
           
@@ -755,17 +763,99 @@
         }
       }
 
-      // Add CD-Pages data from H column
+      // Process CD-Pages data from H column
       if (unifiedStatus.cd_pages && typeof unifiedStatus.cd_pages === 'object') {
-        Object.entries(unifiedStatus.cd_pages).forEach(([pattern, data]) => {
-          editionStructure['06CDPages'].push({
-            type: 'cd_page_item',
-            pattern: pattern,
-            displayName: data.display_name || pattern,
-            ok: data.ok || "Wait",
-            time: data.time || 'N/A'
+        // Check if the data is in the format we expect (with standard_pages, special_pages, etc.)
+        if (unifiedStatus.cd_pages.standard_pages || unifiedStatus.cd_pages.special_pages || 
+            unifiedStatus.cd_pages.supplements || unifiedStatus.cd_pages.other_files) {
+          
+          // Add section title for standard pages
+          if (unifiedStatus.cd_pages.standard_pages && unifiedStatus.cd_pages.standard_pages.length > 0) {
+            editionStructure['06CDPages'].push({
+              type: 'central_desk_title',
+              text: `Standard Pages (${unifiedStatus.cd_pages.standard_pages.length} Files)`
+            });
+            
+            // Add standard pages
+            unifiedStatus.cd_pages.standard_pages.forEach(item => {
+              editionStructure['06CDPages'].push({
+                type: 'cd_page_item',
+                pattern: item.filename || '',
+                displayName: item.display_name || '',
+                ok: item.ok || "Wait",
+                time: item.time || 'N/A'
+              });
+            });
+          }
+          
+          // Add section title for special pages
+          if (unifiedStatus.cd_pages.special_pages && unifiedStatus.cd_pages.special_pages.length > 0) {
+            editionStructure['06CDPages'].push({
+              type: 'central_desk_title',
+              text: `Special Pages (${unifiedStatus.cd_pages.special_pages.length} Files)`
+            });
+            
+            // Add special pages
+            unifiedStatus.cd_pages.special_pages.forEach(item => {
+              editionStructure['06CDPages'].push({
+                type: 'cd_page_item',
+                pattern: item.filename || '',
+                displayName: item.display_name || '',
+                ok: item.ok || "Wait",
+                time: item.time || 'N/A'
+              });
+            });
+          }
+          
+          // Add section title for supplements
+          if (unifiedStatus.cd_pages.supplements && unifiedStatus.cd_pages.supplements.length > 0) {
+            editionStructure['06CDPages'].push({
+              type: 'central_desk_title',
+              text: `Supplements (${unifiedStatus.cd_pages.supplements.length} Files)`
+            });
+            
+            // Add supplements
+            unifiedStatus.cd_pages.supplements.forEach(item => {
+              editionStructure['06CDPages'].push({
+                type: 'cd_page_item',
+                pattern: item.filename || '',
+                displayName: item.display_name || '',
+                ok: item.ok || "Wait",
+                time: item.time || 'N/A'
+              });
+            });
+          }
+          
+          // Add section title for other files
+          if (unifiedStatus.cd_pages.other_files && unifiedStatus.cd_pages.other_files.length > 0) {
+            editionStructure['06CDPages'].push({
+              type: 'central_desk_title',
+              text: `Other Files (${unifiedStatus.cd_pages.other_files.length} Files)`
+            });
+            
+            // Add other files
+            unifiedStatus.cd_pages.other_files.forEach(item => {
+              editionStructure['06CDPages'].push({
+                type: 'cd_page_item',
+                pattern: item.filename || '',
+                displayName: item.display_name || '',
+                ok: item.ok || "Wait",
+                time: item.time || 'N/A'
+              });
+            });
+          }
+        } else {
+          // Handle the old format (direct object with patterns)
+          Object.entries(unifiedStatus.cd_pages).forEach(([pattern, data]) => {
+            editionStructure['06CDPages'].push({
+              type: 'cd_page_item',
+              pattern: pattern,
+              displayName: data.display_name || pattern,
+              ok: data.ok || "Wait",
+              time: data.time || 'N/A'
+            });
           });
-        });
+        }
       }
 
       // Remove empty editions (except CD-Pages which should always show)
@@ -824,15 +914,19 @@
 
       // Check if we have data and update tab visibility
       const hasPulloutData = editionStructure.hasOwnProperty('05Pullout') && editionStructure['05Pullout'].length > 0;
+      const hasCDPagesData = editionStructure.hasOwnProperty('06CDPages') && editionStructure['06CDPages'].length > 0;
       
       const pulloutTab = document.getElementById('tab-pullout-btn');
+      const cdPagesTab = document.getElementById('tab-cd-pages-btn');
       
       if (pulloutTab) {
         pulloutTab.style.display = hasPulloutData ? 'flex' : 'none';
       }
       
-      // CD-Pages tab is always visible
-
+      if (cdPagesTab) {
+        cdPagesTab.style.display = hasCDPagesData ? 'flex' : 'none';
+      }
+      
       // Render each edition to its respective tab
       const tabMapping = {
         '01Kokan': 'kokan',
@@ -867,7 +961,15 @@
         // Special handling for CD-Pages (4 columns)
         if (editionKey === '06CDPages') {
           rows.forEach(item => {
-            if (item.type === 'cd_page_item') {
+            if (item.type === 'central_desk_title') {
+              const tr = document.createElement('tr');
+              tr.className = 'central-desk-group-title-row';
+              const td = document.createElement('td');
+              td.colSpan = 4;
+              td.textContent = item.text;
+              tr.appendChild(td);
+              table.appendChild(tr);
+            } else if (item.type === 'cd_page_item') {
               const tr = document.createElement('tr');
 
               // Pattern
@@ -904,7 +1006,7 @@
             // Group titles
             if (item && typeof item === 'object' && (item.type === 'section_title' || item.type === 'pullout_title')) {
               const tr = document.createElement('tr');
-              tr.className = item.type;
+              tr.className = item.type === 'pullout_title' ? 'pullout-group-title-row' : 'issue-group-title-row';
               const td = document.createElement('td');
               td.colSpan = 6;
               td.textContent = item.text;
@@ -915,14 +1017,12 @@
 
             // Regular PDF rows
             if (item && item.file) {
-              const abbreviatedFileName = getAbbreviatedFilename(item.file);
               const tr = document.createElement('tr');
 
-              // File name
-              const fileTd = document.createElement('td');
-              fileTd.className = 'filename-col';
-              fileTd.textContent = abbreviatedFileName;
-              fileTd.title = item.file;
+              // Filename
+              const filenameTd = document.createElement('td');
+              filenameTd.className = 'filename-col';
+              filenameTd.textContent = getAbbreviatedFilename(item.file);
 
               // Title
               const titleTd = document.createElement('td');
@@ -950,7 +1050,7 @@
               timeTd.textContent = item.ok === "OK" ? (item.time || 'N/A') : 'N/A';
 
               // Append all columns
-              tr.appendChild(fileTd);
+              tr.appendChild(filenameTd);
               tr.appendChild(titleTd);
               tr.appendChild(editTd);
               tr.appendChild(icdTd);
@@ -966,115 +1066,132 @@
         totalCards++;
       }
 
-      updateProgress(100, 'Complete!');
-
-      // Activate Kokan tab by default
-      switchTab('kokan');
+      // If no data found, show message
+      if (totalCards === 0) {
+        document.getElementById('tab-kokan').innerHTML = '<div class="warning">No page data found for this date</div>';
+        document.getElementById('tab-kokan').classList.add('active');
+      }
+      
+      updateProgress(100, 'Complete');
     }
 
-    // Navigate to a specific date
-    async function navigateToDate(index) {
-      if (index < 0 || index >= availableDates.length) return;
-      
-      currentDateIndex = index;
-      const datePrefix = availableDates[index];
-      
-      clearMessages();
+    // Load data for a specific date
+    async function loadDataForDate(dateIndex) {
+      if (dateIndex < 0 || dateIndex >= availableDates.length) {
+        throw new Error('Invalid date index');
+      }
+
+      const datePrefix = availableDates[dateIndex];
+      currentDateIndex = dateIndex;
+
       showLoading(`Loading data for ${formatDisplayDate(datePrefix)}...`);
-      
+      clearMessages();
+
       try {
-        // Use single snapshot API call instead of multiple edition calls
         const snapshotData = await loadSnapshotData(datePrefix);
-        hideLoading();
         renderStatusCards(snapshotData);
         
         // Update navigation buttons
-        updateNavigationButtons();
+        prevDateBtn.disabled = dateIndex === 0;
+        nextDateBtn.disabled = dateIndex === availableDates.length - 1;
         
+        // Save current date to localStorage
+        localStorage.setItem('ctp-current-date', datePrefix);
+        
+        hideLoading();
       } catch (err) {
         hideLoading();
         showError(err.message);
+        console.error('Error loading data:', err);
       }
-    }
-
-    // Update navigation buttons state
-    function updateNavigationButtons() {
-      prevDateBtn.disabled = currentDateIndex >= availableDates.length - 1;
-      nextDateBtn.disabled = currentDateIndex <= 0;
-    }
-
-    // Start automatic synchronization
-    function startAutoSync() {
-      if (syncIntervalId) clearInterval(syncIntervalId);
-      
-      syncIntervalId = setInterval(async () => {
-        if (currentDateIndex >= 0 && currentDateIndex < availableDates.length) {
-          try {
-            const datePrefix = availableDates[currentDateIndex];
-            const snapshotData = await loadSnapshotData(datePrefix);
-            renderStatusCards(snapshotData);
-          } catch (err) {
-            console.error('Auto-sync failed:', err.message);
-          }
-        }
-      }, 30000);
     }
 
     // Initialize the application
-    async function initialize() {
+    async function initializeApp() {
       try {
-        showLoading('Initializing application...');
+        showLoading('Loading available dates...');
         
-        // Initialize tabs first
+        // Initialize tabs
         initializeTabs();
         
-        updateProgress(10, 'Loading dates...');
+        // Load available dates
         availableDates = await fetchAvailableDates();
         
         if (availableDates.length === 0) {
-          throw new Error('No dates found in the database');
+          throw new Error('No monitoring dates available');
         }
         
-        // Set current date to the most recent (first in array after sort)
-        currentDateIndex = availableDates.length - 1;
+        // Determine which date to load
+        let targetDateIndex = availableDates.length - 1; // Default to latest date
         
-        // Navigate to current date
-        await navigateToDate(currentDateIndex);
+        // Try to load saved date from localStorage
+        const savedDate = localStorage.getItem('ctp-current-date');
+        if (savedDate && availableDates.includes(savedDate)) {
+          targetDateIndex = availableDates.indexOf(savedDate);
+        }
         
-        // Start auto-sync
-        startAutoSync();
+        // Load saved active tab
+        const savedTab = localStorage.getItem('ctp-active-tab');
+        if (savedTab) {
+          currentActiveTab = savedTab;
+        }
+        
+        // Load data for the selected date
+        await loadDataForDate(targetDateIndex);
+        
+        // Switch to saved tab
+        switchTab(currentActiveTab);
+        
+        // Set up auto-refresh
+        startAutoRefresh();
         
       } catch (err) {
         hideLoading();
         showError(err.message);
-        
-        // Show additional help for common issues
-        if (err.message.includes('Failed to fetch') || err.message.includes('timeout')) {
-          showWarning(`
-            Connection issue detected. Please check:
-            1. Your internet connection
-            2. The Google Apps Script URL is correct and deployed as web app
-            3. The script has proper permissions (Execute as: Me, Access: Anyone)
-          `);
-        }
+        console.error('Initialization error:', err);
       }
+    }
+
+    // Start auto-refresh
+    function startAutoRefresh() {
+      // Clear any existing interval
+      if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+      }
+      
+      // Set up new interval (every 2 minutes)
+      syncIntervalId = setInterval(async () => {
+        try {
+          await loadDataForDate(currentDateIndex);
+          console.log('Auto-refresh completed');
+        } catch (err) {
+          console.error('Auto-refresh failed:', err);
+        }
+      }, 120000); // 2 minutes
     }
 
     // Event listeners
     prevDateBtn.addEventListener('click', () => {
-      if (currentDateIndex < availableDates.length - 1) {
-        navigateToDate(currentDateIndex + 1);
+      if (currentDateIndex > 0) {
+        loadDataForDate(currentDateIndex - 1);
       }
     });
 
     nextDateBtn.addEventListener('click', () => {
-      if (currentDateIndex > 0) {
-        navigateToDate(currentDateIndex - 1);
+      if (currentDateIndex < availableDates.length - 1) {
+        loadDataForDate(currentDateIndex + 1);
       }
     });
 
     // Initialize the app when DOM is loaded
-    document.addEventListener('DOMContentLoaded', initialize);
+    document.addEventListener('DOMContentLoaded', initializeApp);
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', () => {
+      if (syncIntervalId) {
+        clearInterval(syncIntervalId);
+      }
+    });
   </script>
 </body>
 </html>
